@@ -1,0 +1,7 @@
+Sample Images
+-------------
+These PNG files are minimal single-colour images created for testing purposes.
+red_square.png   — 50x50 red
+blue_square.png  — 50x50 blue
+green_rect.png   — 80x60 green
+yellow_square.png — 40x40 yellow

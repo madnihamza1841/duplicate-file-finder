@@ -1,0 +1,14 @@
+Meeting Notes — 2026-06-08
+==========================
+
+Attendees: Engineering, QA, Product
+
+Topics covered:
+  1. Release timeline for v1.0
+  2. Edge-case behaviour for unreadable directories
+  3. Performance benchmarks on 50K-file test tree
+
+Action items:
+  - Add --min-size default to docs
+  - Verify symlink behaviour on Windows paths
+  - Add sample_data folder to repository

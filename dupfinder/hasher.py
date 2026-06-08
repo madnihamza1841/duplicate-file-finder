@@ -1,4 +1,19 @@
-"""Core hashing and directory-walking logic."""
+"""Core hashing and directory-walking logic.
+
+This module implements the three-pass duplicate-detection strategy:
+
+1. **Size filter** — files with unique sizes cannot be duplicates and are
+   eliminated immediately without reading any file content.
+2. **Partial hash** — for size-collision candidates, only the first 64 KB
+   is hashed. This rules out the vast majority of false positives cheaply
+   (e.g. two large files that differ early on).
+3. **Full MD5 hash** — only files that survive both earlier filters receive
+   a complete hash, minimising total I/O on large directory trees.
+
+Logging uses the standard ``logging`` module at WARNING level for
+recoverable problems (unreadable files, permission errors) so the caller
+decides how and whether to surface them.
+"""
 
 import hashlib
 import logging
@@ -9,12 +24,26 @@ from dupfinder.models import DuplicateGroup
 
 logger = logging.getLogger(__name__)
 
-CHUNK = 65_536       # 64 KB — read chunk and pre-hash window size
-PRE_HASH_SIZE = CHUNK
+CHUNK: int = 65_536
+"""Read buffer size and partial-hash window: 64 KB."""
+
+PRE_HASH_SIZE: int = CHUNK
+"""Number of bytes read for the fast partial-hash pre-filter."""
 
 
 def _md5_partial(path: Path, max_bytes: int = PRE_HASH_SIZE) -> str | None:
-    """Return MD5 of the first *max_bytes* of *path*, or None on error."""
+    """Return the MD5 digest of the first *max_bytes* of *path*.
+
+    Used as a cheap pre-filter: if two files differ within the first 64 KB
+    they cannot be identical, so a full hash is unnecessary.
+
+    Args:
+        path:      Path to the file to hash.
+        max_bytes: Maximum number of bytes to read (default: 64 KB).
+
+    Returns:
+        Hex MD5 string on success, or ``None`` if the file cannot be read.
+    """
     h = hashlib.md5()
     try:
         with path.open("rb") as fh:
@@ -27,7 +56,15 @@ def _md5_partial(path: Path, max_bytes: int = PRE_HASH_SIZE) -> str | None:
 
 
 def md5_of_file(path: Path) -> str | None:
-    """Return the full hex MD5 digest of *path*, or None on I/O error."""
+    """Return the full MD5 digest of *path* by reading it in 64 KB chunks.
+
+    Args:
+        path: Path to the file to hash.
+
+    Returns:
+        32-character hex MD5 string on success, or ``None`` on any I/O error
+        (permission denied, file disappeared mid-scan, etc.).
+    """
     h = hashlib.md5()
     try:
         with path.open("rb") as fh:
@@ -40,12 +77,28 @@ def md5_of_file(path: Path) -> str | None:
 
 
 def walk_files(directories: list[Path], min_size: int = 1) -> list[Path]:
-    """Recursively collect regular, non-symlink files that meet *min_size*.
+    """Recursively collect all regular files across *directories*.
 
-    Skips unreadable directories gracefully and deduplicates inodes so
-    hard-linked files are not double-counted.
+    The walk applies three filters before a file is added to the result:
+
+    * **Symlinks** are skipped — following them could escape the intended
+      scan scope and would report links as duplicates of their targets.
+    * **Hard links** sharing the same ``(device, inode)`` pair are
+      deduplicated so the same physical file is never counted twice.
+    * **Small files** below *min_size* bytes are excluded (default 1 byte,
+      which skips empty files).
+
+    Directories that raise ``PermissionError`` are logged and skipped so
+    the scan continues rather than crashing.
+
+    Args:
+        directories: List of root directories to scan recursively.
+        min_size:    Minimum file size in bytes to include (default: 1).
+
+    Returns:
+        Deduplicated list of Path objects for qualifying files.
     """
-    seen_inodes: set[int] = set()
+    seen_inodes: set[tuple[int, int]] = set()
     result: list[Path] = []
 
     for base in directories:
@@ -56,7 +109,6 @@ def walk_files(directories: list[Path], min_size: int = 1) -> list[Path]:
             continue
 
         for p in entries:
-            # Skip symlinks — they are not true duplicates
             if p.is_symlink():
                 continue
             if not p.is_file():
@@ -67,7 +119,6 @@ def walk_files(directories: list[Path], min_size: int = 1) -> list[Path]:
                 logger.warning("Cannot stat %s: %s", p, exc)
                 continue
 
-            # Deduplicate hard links by inode
             inode = (st.st_dev, st.st_ino)
             if inode in seen_inodes:
                 continue
@@ -86,14 +137,32 @@ def find_duplicates(
 ) -> list[DuplicateGroup]:
     """Scan *directories* and return groups of files with identical content.
 
-    Uses a three-pass strategy to minimise I/O:
-      1. Group by file size — unique sizes cannot be duplicates.
-      2. Group by 64 KB partial hash — filters out most non-matches cheaply.
-      3. Full MD5 hash only on remaining candidates.
+    Runs the three-pass pipeline (size → partial hash → full MD5) to find
+    every set of two or more files that share the same byte content.
+    Results are sorted by wasted space descending so the most impactful
+    groups appear first.
+
+    Args:
+        directories: One or more root directories to scan recursively.
+        min_size:    Skip files strictly smaller than this many bytes.
+                     Default is 1, which skips empty files. Pass 0 to
+                     include empty files (all empty files share the same
+                     hash and will form one group).
+
+    Returns:
+        List of :class:`~dupfinder.models.DuplicateGroup` objects, each
+        containing the shared MD5, file size, and all duplicate paths.
+        Returns an empty list when no duplicates are found.
+
+    Example:
+        >>> from pathlib import Path
+        >>> groups = find_duplicates([Path("/home/user/Downloads")])
+        >>> for g in groups:
+        ...     print(g.md5, g.wasted_bytes, g.paths)
     """
     files = walk_files(directories, min_size=min_size)
 
-    # Pass 1: group by size
+    # Pass 1: group by file size — only files of the same size can be duplicates
     by_size: dict[int, list[Path]] = defaultdict(list)
     for p in files:
         try:
@@ -101,7 +170,7 @@ def find_duplicates(
         except OSError:
             continue
 
-    # Pass 2: partial hash to rule out non-duplicates cheaply
+    # Pass 2: cheap partial hash to eliminate most false positives
     by_partial: dict[str, list[Path]] = defaultdict(list)
     for size, candidates in by_size.items():
         if len(candidates) < 2:
@@ -111,9 +180,9 @@ def find_duplicates(
             if digest is not None:
                 by_partial[f"{size}:{digest}"].append(p)
 
-    # Pass 3: full hash only on partial-hash matches
+    # Pass 3: full hash only on survivors of the partial-hash filter
     by_hash: dict[str, list[Path]] = defaultdict(list)
-    for key, candidates in by_partial.items():
+    for _key, candidates in by_partial.items():
         if len(candidates) < 2:
             continue
         for p in candidates:

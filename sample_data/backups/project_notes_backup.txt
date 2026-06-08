@@ -1,0 +1,11 @@
+Project Notes
+=============
+
+Sprint 1: Set up the repository, define data models, write core hashing logic.
+Sprint 2: Build the CLI layer with rich table output and colour coding.
+Sprint 3: Handle edge cases — symlinks, hard links, permissions, empty files.
+Sprint 4: Write the full test suite with real files using tmp_path fixtures.
+Sprint 5: Polish documentation, add sample data, update README.
+
+Key design decision: three-pass hashing (size → 64 KB partial → full MD5)
+avoids reading large files unless they are genuine size-collision candidates.
