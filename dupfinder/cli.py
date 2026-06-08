@@ -76,6 +76,7 @@ def _delete_duplicates(groups: list[DuplicateGroup], dry_run: bool) -> int:
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Build and return the argument parser namespace."""
     parser = argparse.ArgumentParser(
         prog="dupfind",
         description="Find (and optionally delete) duplicate files using MD5 hashing.",
@@ -113,6 +114,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Entry point for the dupfind CLI. Returns an exit code."""
     args = _parse_args(argv)
 
     dirs = [Path(d) for d in args.directories]
