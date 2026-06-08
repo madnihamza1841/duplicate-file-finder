@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "duplicate-file-finder"
+version = "0.1.0"
+description = "CLI tool to find and optionally delete duplicate files using MD5 hashing"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "rich>=13.0",
+    "colorama>=0.4.6",
+]
+
+[project.scripts]
+dupfind = "dupfinder.cli:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
