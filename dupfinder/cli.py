@@ -13,6 +13,7 @@ from dupfinder.hasher import find_duplicates
 from dupfinder.models import DuplicateGroup
 
 console = Console()
+err_console = Console(stderr=True)
 
 
 def _human_size(num_bytes: int) -> str:
@@ -70,7 +71,7 @@ def _delete_duplicates(groups: list[DuplicateGroup], dry_run: bool) -> int:
                     console.print(f"[red]Deleted[/red] {path}")
                     deleted += 1
                 except OSError as exc:
-                    console.print(f"[bold red]Error[/bold red] deleting {path}: {exc}", err=True)
+                    err_console.print(f"[bold red]Error[/bold red] deleting {path}: {exc}")
     return deleted
 
 
@@ -117,7 +118,7 @@ def main(argv: list[str] | None = None) -> int:
     dirs = [Path(d) for d in args.directories]
     for d in dirs:
         if not d.is_dir():
-            console.print(f"[bold red]Error:[/bold red] {d} is not a directory.", err=True)
+            err_console.print(f"[bold red]Error:[/bold red] {d} is not a directory.")
             return 2
 
     with console.status("[bold green]Scanning for duplicates…[/bold green]"):
